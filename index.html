@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Katla Live (Multi-Server Support)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Socket.IO (Wajib untuk Custom Backend) -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+    <style>
+        /* --- ANIMASI BACKGROUND --- */
+        @keyframes animateBackground {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background: linear-gradient(-45deg, #020617, #0f172a, #1e1b4b, #172554);
+            background-size: 400% 400%;
+            animation: animateBackground 20s ease infinite;
+            color: #e2e8f0;
+            overscroll-behavior: none;
+            touch-action: manipulation;
+            transition: background 0.3s;
+        }
+
+        /* --- GREEN SCREEN MODE --- */
+        body.chroma-mode {
+            background: #00b140 !important;
+            animation: none !important;
+        }
+        body.chroma-mode .tile {
+            background-color: #0f172a !important;
+            border-color: white !important;
+            box-shadow: none !important;
+        }
+        body.chroma-mode #main-menu, 
+        body.chroma-mode header,
+        body.chroma-mode #live-queue-display,
+        body.chroma-mode .modal-content,
+        body.chroma-mode .rank-popup-card {
+            background-color: #1e293b !important;
+            border-radius: 12px;
+            border: 2px solid white;
+        }
+
+        /* --- UTILITIES --- */
+        .hidden-screen { display: none !important; }
+        .flex-screen { display: flex !important; }
+
+        /* --- SCROLLBAR --- */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+
+        /* --- GRID SCROLL HANDLING --- */
+        #grid-container {
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+            padding-bottom: 120px; 
+            padding-top: 20px;
+            padding-left: 40px; 
+            padding-right: 40px; 
+            position: relative;
+            box-sizing: border-box; 
+        }
+        
+        @media (max-width: 400px) {
+            #grid-container {
+                padding-left: 30px;
+                padding-right: 30px;
+            }
+        }
+
+        #grid-container::-webkit-scrollbar { display: none; }
+
+        /* --- TILE STYLES (ENHANCED VISUALS) --- */
+        .tile {
+            width: 100%;
+            aspect-ratio: 1/1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: 900;
+            text-transform: uppercase;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            background-color: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(4px);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            position: relative;
+            color: #e2e8f0;
+        }
+
+        .tile.active-row-highlight {
+            border-color: #38bdf8 !important; 
+            background-color: rgba(56, 189, 248, 0.1);
+        }
+
+        .tile[data-state="active"] { 
+            border-color: #22d3ee; 
+            background-color: rgba(34, 211, 238, 0.15); 
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2); 
+            color: #ffffff;
+            text-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+            animation: pop 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            transform: scale(1.05);
+            z-index: 10;
+        }
+
+        .tile[data-state="correct"] { 
+            background: linear-gradient(135deg, #16a34a, #15803d); 
+            border: none;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.3), 0 4px 6px rgba(0,0,0,0.3);
+            color: white; 
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .tile[data-state="present"] { 
+            background: linear-gradient(135deg, #d97706, #b45309);
+            border: none;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.3), 0 4px 6px rgba(0,0,0,0.3);
+            color: white; 
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .tile[data-state="absent"] { 
+            background-color: #1e293b; 
+            border-color: #1e293b; 
+            color: #64748b; 
+        }
+        
+        .tile.reveal { animation: revealPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+
+        .new-row-anim { animation: fadeInRow 0.3s ease-out forwards; }
+
+        @keyframes fadeInRow { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pop { 0% { transform: scale(0.9); } 70% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        
+        @keyframes revealPop { 
+            0% { transform: scale(1); } 
+            50% { transform: scale(1.15); } 
+            100% { transform: scale(1); } 
+        }
+
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
+        .shake { animation: shake 0.4s; }
+        
+        /* --- KEYBOARD STYLES --- */
+        .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; width: 100%; }
+        
+        .key {
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+            display: flex; justify-content: center; align-items: center;
+            background-color: #cbd5e1; 
+            color: #0f172a;
+            border-radius: 8px; 
+            cursor: pointer;
+            user-select: none;
+            height: 54px;
+            flex: 1;
+            font-size: 1.1rem;
+            transition: all 0.15s;
+            box-shadow: 0 3px 0 #94a3b8; 
+            border: none;
+        }
+
+        @media (max-height: 700px) {
+            .key { height: 42px; font-size: 0.9rem; border-radius: 6px; box-shadow: 0 2px 0 #94a3b8; }
+            .keyboard-row { margin-bottom: 4px; gap: 3px; }
+        }
+        
+        .key:active { transform: translateY(3px); box-shadow: none; }
+        .key.large { flex: 1.5; font-size: 0.9rem; }
+        
+        .key[data-state="correct"] { background-color: #16a34a; color: white; box-shadow: 0 3px 0 #14532d; }
+        .key[data-state="present"] { background-color: #d97706; color: white; box-shadow: 0 3px 0 #78350f; }
+        .key[data-state="absent"] { background-color: #334155; color: #94a3b8; box-shadow: 0 3px 0 #1e293b; }
+
+        /* --- MODAL --- */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85); 
+            backdrop-filter: blur(8px); 
+            z-index: 150;
+            display: none; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .modal-overlay.open { display: flex; opacity: 1; }
+        
+        .modal-content {
+            background: #1e293b; border: 1px solid #475569;
+            padding: 24px; border-radius: 20px;
+            text-align: center; max-width: 90%; width: 340px;
+            transform: scale(0.9); transition: transform 0.3s;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            max-height: 90vh; overflow-y: auto;
+        }
+        .modal-overlay.open .modal-content { transform: scale(1); }
+        
+        /* Custom Switch */
+        .toggle-checkbox:checked { right: 0; border-color: #22d3ee; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #22d3ee; }
+        
+        .toggle-checkbox.amber-switch:checked { border-color: #fbbf24; }
+        .toggle-checkbox.amber-switch:checked + .toggle-label { background-color: #fbbf24; }
+
+        .toggle-checkbox.purple-switch:checked { border-color: #a855f7; }
+        .toggle-checkbox.purple-switch:checked + .toggle-label { background-color: #a855f7; }
+
+        .toggle-checkbox.pink-switch:checked { border-color: #f472b6; }
+        .toggle-checkbox.pink-switch:checked + .toggle-label { background-color: #f472b6; }
+
+        .toggle-checkbox.cyan-switch:checked { border-color: #06b6d4; }
+        .toggle-checkbox.cyan-switch:checked + .toggle-label { background-color: #06b6d4; }
+
+        /* --- LIVE STREAMER ELEMENTS --- */
+        .guesser-badge {
+            position: absolute;
+            left: -42px; 
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 50;
+            pointer-events: none;
+            animation: popInLeft 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        .guesser-avatar {
+            width: 36px; height: 36px; 
+            border-radius: 50%;
+            border: 2px solid #22d3ee; 
+            object-fit: cover; 
+            background-color: #1e293b; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            z-index: 20;
+        }
+
+        .guesser-name {
+            position: absolute;
+            left: 15px; 
+            background: linear-gradient(90deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.8));
+            color: #22d3ee;
+            font-size: 0.8rem; font-weight: 800;
+            padding: 4px 12px 4px 28px;
+            border-radius: 0 99px 99px 0;
+            border: 1px solid #22d3ee;
+            border-left: none;
+            white-space: nowrap;
+            max-width: 140px;
+            overflow: hidden; text-overflow: ellipsis;
+            z-index: 10;
+            opacity: 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            animation: slideNameOut 4s forwards;
+        }
+
+        @keyframes popInLeft {
+            from { opacity: 0; transform: translate(-20px, -50%) scale(0.5); }
+            to { opacity: 1; transform: translate(0, -50%) scale(1); }
+        }
+
+        @keyframes slideNameOut {
+            0% { opacity: 0; transform: translateX(0); }
+            10% { opacity: 1; transform: translateX(0); }
+            80% { opacity: 1; transform: translateX(0); }
+            100% { opacity: 0; transform: translateX(-10px); } 
+        }
+
+        /* --- RANK POPUP (EYE CATCHING) --- */
+        #rank-popup-area {
+            position: absolute;
+            top: 10px; 
+            left: 0; 
+            right: 0;
+            pointer-events: none;
+            z-index: 120;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rank-popup-card {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 2px solid #fbbf24;
+            border-radius: 16px;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.6), inset 0 0 10px rgba(251, 191, 36, 0.2); 
+            animation: rankSlideIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), rankFadeOut 0.5s ease-in 3.5s forwards;
+            min-width: 260px;
+            backdrop-filter: blur(12px);
+            transform-origin: top center;
+        }
+
+        .rank-avatar-container {
+            position: relative;
+        }
+
+        .rank-avatar {
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            border: 3px solid #fbbf24;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+            object-fit: cover;
+            background-color: #334155;
+        }
+
+        .rank-badge-icon {
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            background: #fbbf24;
+            color: #000;
+            font-weight: 900;
+            font-size: 11px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .rank-info {
+            text-align: left;
+            flex: 1;
+        }
+
+        .rank-title {
+            color: #fbbf24;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 0px;
+            text-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
+        }
+
+        .rank-user {
+            color: #fff;
+            font-weight: 900;
+            font-size: 18px;
+            line-height: 1.1;
+            margin-bottom: 2px;
+            display: block;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .rank-stats {
+            color: #e2e8f0;
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        @keyframes rankSlideIn {
+            0% { opacity: 0; transform: translateY(-40px) scale(0.8); }
+            60% { opacity: 1; transform: translateY(10px) scale(1.05); }
+            100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes rankFadeOut {
+            to { opacity: 0; transform: translateY(-30px) scale(0.9); pointer-events: none; }
+        }
+
+        /* HARD MODE VIOLATION TOAST */
+        .hard-mode-toast {
+            position: absolute; left: 50%; z-index: 110;
+            background: rgba(185, 28, 28, 0.95); color: white;
+            border: 2px solid white; border-radius: 8px;
+            padding: 8px 16px; font-size: 0.9rem; font-weight: 700;
+            text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+            pointer-events: none; white-space: normal;
+            width: max-content; max-width: 90%; 
+            animation: bounceInBelow 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+
+        /* RANK NOTIFICATION TOAST */
+        .rank-toast {
+            position: fixed; top: 20%; right: 20px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-left: 4px solid #facc15;
+            backdrop-filter: blur(12px); border-radius: 12px;
+            padding: 16px; display: flex; align-items: center; gap: 12px;
+            color: white; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            z-index: 200;
+            animation: slideInRight 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            max-width: 280px;
+        }
+
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .rank-toast.fade-out { animation: fadeOutRight 0.4s forwards; }
+        @keyframes fadeOutRight { to { opacity: 0; transform: translateX(100%); } }
+        @keyframes bounceInBelow { 0% { transform: translate(-50%, -10px) scale(0.9); opacity: 0; } 100% { transform: translate(-50%, 0) scale(1); opacity: 1; } }
+
+        /* LIVE STATUS INDICATOR */
+        .live-indicator {
+            display: flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 700;
+            background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.1);
+            padding: 4px 10px; border-radius: 99px;
+        }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        .live-dot.connected { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        
+        /* LEADERBOARD STYLES */
+        .leaderboard-row {
+            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 6px 10px; border-radius: 8px; font-size: 0.8rem;
+        }
+        .leaderboard-row.rank-1 { background: linear-gradient(90deg, rgba(234, 179, 8, 0.2), rgba(234, 179, 8, 0.05)); border-color: rgba(234, 179, 8, 0.4); }
+        .leaderboard-row.rank-2 { background: linear-gradient(90deg, rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.05)); border-color: rgba(148, 163, 184, 0.4); }
+        .leaderboard-row.rank-3 { background: linear-gradient(90deg, rgba(180, 83, 9, 0.2), rgba(180, 83, 9, 0.05)); border-color: rgba(180, 83, 9, 0.4); }
+
+        /* BANNED BADGE */
+        .banned-badge {
+            background: #ef4444; color: white; font-size: 0.6rem; padding: 2px 6px;
+            border-radius: 4px; font-weight: bold; margin-left: 6px; text-transform: uppercase;
+        }
+
+        /* GIFT ACTION BOX */
+        .gift-action-box {
+            background: linear-gradient(135deg, #db2777 0%, #be185d 100%);
+            border: 2px solid #f9a8d4;
+            box-shadow: 0 0 15px rgba(219, 39, 119, 0.5);
+            animation: pulse-border 1.5s infinite;
+        }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0 0 rgba(219, 39, 119, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(219, 39, 119, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(219, 39, 119, 0); }
+        }
+
+    </style>
+</head>
+<body class="h-[100dvh] overflow-hidden flex flex-col">
+
+    <!-- LOADING SPINNER -->
+    <div id="loading" class="fixed inset-0 bg-slate-900 z-[200] flex flex-col items-center justify-center transition-opacity duration-500">
+        <div class="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="text-cyan-400 font-bold animate-pulse">MEMUAT GAME...</p>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed bottom-32 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-4 rounded-xl font-bold shadow-2xl border-2 border-white/20 z-[160] opacity-0 transition-all pointer-events-none whitespace-nowrap text-lg text-center">
+        Pesan di sini
+    </div>
+
+    <!-- MAIN MENU SCREEN -->
+    <div id="main-menu" class="flex-1 flex flex-col p-6 w-full max-w-md mx-auto z-10 h-full">
+        <div class="text-center space-y-2 py-8 flex-shrink-0 animate-bounce">
+            <h1 class="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 tracking-tighter italic filter drop-shadow-lg">KATLA</h1>
+            <p class="text-slate-400 font-bold tracking-[0.3em] text-sm uppercase">Live Interactive</p>
+        </div>
+
+        <div class="flex-1 menu-scroll overflow-y-auto space-y-4 pb-4 px-1">
+            <!-- LIVE INTERACTIVE -->
+            <button onclick="openLiveSetup()" class="menu-btn w-full bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border border-green-500/50 p-4 rounded-2xl flex items-center gap-4 group shadow-lg text-green-400">
+                <div class="w-12 h-12 bg-green-500/20 rounded-xl flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-inner relative">
+                    📡
+                </div>
+                <div class="text-left flex-1">
+                    <div class="font-black text-white text-lg">Katla Live TikTok</div>
+                    <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wide mt-0.5">IndoFinity / Backend</div>
+                </div>
+                <div class="text-green-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </div>
+            </button>
+
+            <!-- SOLO MODE -->
+            <button onclick="startGameMode('classic')" class="menu-btn w-full bg-slate-800/80 hover:bg-slate-700 backdrop-blur-sm border border-slate-600 p-4 rounded-2xl flex items-center gap-4 group shadow-lg text-blue-400">
+                <div class="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-inner">
+                    🎮
+                </div>
+                <div class="text-left flex-1">
+                    <div class="font-black text-white text-lg">Katla Solo</div>
+                    <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wide mt-0.5">Latihan Tanpa Live</div>
+                </div>
+            </button>
+
+            <!-- KATA BERKAIT -->
+            <button onclick="showToast('Segera Hadir! Pantau Terus!')" class="menu-btn w-full bg-slate-800/50 border border-slate-700 p-4 rounded-2xl flex items-center gap-4 group shadow-lg text-slate-400 opacity-75 hover:opacity-100 hover:border-amber-500/50 transition-all">
+                <div class="w-12 h-12 bg-amber-500/10 rounded-xl flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-inner text-amber-500">
+                    🔗
+                </div>
+                <div class="text-left flex-1">
+                    <div class="font-black text-white text-lg flex items-center gap-2">
+                        Kata Berkait
+                        <span class="text-[10px] bg-amber-500 text-black px-1.5 py-0.5 rounded font-bold">SOON</span>
+                    </div>
+                    <div class="text-slate-500 text-[10px] uppercase font-bold tracking-wide mt-0.5">Sambung Kata Viral</div>
+                </div>
+            </button>
+        </div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="hidden-screen flex-col h-full w-full">
+        <header class="w-full flex justify-between items-center p-3 border-b border-white/10 bg-slate-900/80 backdrop-blur-md z-10 flex-shrink-0">
+            <div class="flex gap-2 items-center">
+                <button onclick="backToMenu()" class="p-2 text-slate-400 hover:text-white transition bg-slate-800 rounded-lg active:scale-95">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <div id="live-status-badge" class="hidden live-indicator">
+                    <div class="live-dot" id="live-dot"></div>
+                    <span id="live-text" class="text-white">OFFLINE</span>
+                </div>
+            </div>
+
+            <div class="text-center flex flex-col items-center">
+                <h1 class="text-2xl font-black tracking-tighter italic bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">KATLA</h1>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="toggleChromaKey()" class="p-2 text-green-400 bg-green-900/30 hover:bg-green-500 hover:text-white rounded-lg transition border border-green-500/30" title="Green Screen Mode">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button onclick="showSettings()" class="p-2 text-slate-400 hover:text-white transition bg-slate-800 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- GAME AREA -->
+        <div class="flex-grow min-h-0 w-full flex flex-col justify-start items-center p-2 pt-6 relative" style="padding-top: 20px;">
+            <!-- RANK NOTIFICATION AREA (POP UP) -->
+            <div id="rank-popup-area"></div>
+
+            <div id="grid-container" class="grid gap-1.5 w-full mx-auto max-w-sm" style="max-height: 100%;">
+                <!-- Grid generated by JS -->
+            </div>
+        </div>
+
+        <div class="w-full max-w-lg p-2 pb-6 safe-area-bottom flex-shrink-0 z-20 bg-gradient-to-t from-[#020617] to-transparent mx-auto">
+            <div id="keyboard-container"></div>
+            <div id="live-keyboard-blocker" class="hidden text-center text-slate-300 text-sm font-bold py-4 flex flex-col gap-2 bg-slate-900/80 rounded-xl border border-white/10 backdrop-blur">
+                <div class="flex items-center justify-center gap-2">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    <span>LIVE INTERAKTIF AKTIF</span>
+                </div>
+                <span class="text-xs text-slate-500">Ketik jawaban di komentar TikTok!</span>
+                <div id="live-hard-warning" class="hidden text-rose-500 font-black animate-pulse mt-1 border border-rose-500/30 bg-rose-500/10 rounded px-2 py-1 inline-block mx-auto text-xs">
+                    ☠️ MODE SULIT / HARD MODE ☠️
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LIVE SETUP MODAL -->
+    <div id="liveSetupModal" class="modal-overlay">
+        <div class="modal-content text-left">
+            <h2 class="text-2xl font-black mb-1 text-white text-center">LIVE SETUP</h2>
+            <div class="space-y-4">
+                <!-- Provider Selector -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-300 mb-2 uppercase">Koneksi / Provider</label>
+                    <select id="conn-provider" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-bold" onchange="toggleProviderSettings()">
+                        <option value="INDOFINITY">IndoFinity (App Desktop)</option>
+                        <option value="BACKEND">Custom Backend (Node.js)</option>
+                    </select>
+                </div>
+
+                <!-- Backend Username (Hidden for IndoFinity) -->
+                <div id="backend-user-group" class="hidden">
+                    <label class="block text-xs font-bold text-slate-300 mb-2 uppercase text-cyan-400">Target Username TikTok</label>
+                    <div class="flex gap-2">
+                        <span class="flex items-center justify-center bg-slate-700 px-3 rounded-lg text-slate-400 font-bold">@</span>
+                        <select id="backend-username" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-bold">
+                             <option value="ahmadsyams.live">ahmadsyams.live</option>
+                             <option value="arsenic.live">arsenic.live</option>
+                             <option value="sarimin.live">sarimin.live</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- IP & Port Config -->
+                <div class="grid grid-cols-3 gap-2">
+                    <div class="col-span-2">
+                        <label class="block text-xs font-bold text-slate-300 mb-2 uppercase">IP Host (PC)</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="conn-ip" value="localhost" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-mono placeholder-slate-500">
+                            <button onclick="autoDetectIP()" class="bg-cyan-600 hover:bg-cyan-500 px-2 rounded-lg text-white font-bold text-[10px]">AUTO</button>
+                        </div>
+                    </div>
+                    <div>
+                         <label class="block text-xs font-bold text-slate-300 mb-2 uppercase">Port</label>
+                         <input type="number" id="conn-port" value="62024" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-center font-mono text-sm">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                         <label class="block text-xs font-bold text-slate-300 mb-2 uppercase">Target Likes</label>
+                         <input type="number" id="live-likes-target" value="500" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-center font-mono">
+                    </div>
+                    <div>
+                         <label class="block text-xs font-bold text-slate-300 mb-2 uppercase">Huruf (4-8)</label>
+                         <input type="number" id="live-len-input" value="5" min="4" max="8" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-center font-mono">
+                    </div>
+                </div>
+                
+                <div class="bg-blue-900/20 p-3 rounded-lg border border-blue-500/20 text-xs text-slate-300">
+                    <p id="setup-hint"><b>Tips IndoFinity:</b> Pastikan aplikasi sudah "Listening".</p>
+                </div>
+            </div>
+            <div class="flex gap-2 mt-6">
+                <button onclick="closeModal('liveSetupModal')" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold text-white transition">Batal</button>
+                <button onclick="startLiveMode()" class="flex-1 bg-green-600 hover:bg-green-500 py-3 rounded-xl font-bold text-white transition shadow-lg shadow-green-900/20">CONNECT LIVE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 class="text-2xl font-black mb-6 text-white">PENGATURAN</h2>
+            <div class="space-y-6 text-left">
+                <!-- Language Toggle -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-2 uppercase">Bahasa / Language</label>
+                    <div class="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
+                        <button onclick="changeLang('IDN')" id="btn-idn" class="flex-1 py-2 rounded font-bold text-sm transition-all bg-cyan-600 text-white">Indonesia</button>
+                        <button onclick="changeLang('ENG')" id="btn-eng" class="flex-1 py-2 rounded font-bold text-sm transition-all text-slate-400">English</button>
+                        <button onclick="changeLang('MIX')" id="btn-mix" class="flex-1 py-2 rounded font-bold text-sm transition-all text-slate-400">Mix (ID+EN)</button>
+                    </div>
+                </div>
+
+                <!-- Word Length -->
+                 <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-cyan-400">
+                            🔠 Jumlah Huruf
+                        </label>
+                        <input type="number" id="settings-len-input" value="5" min="4" max="8" class="w-16 bg-slate-700 border border-slate-600 rounded-lg p-1 text-white text-center font-mono text-sm font-bold" onchange="changeWordLength(this.value)">
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Game otomatis reset jika diubah.</p>
+                </div>
+
+                <!-- Word Source -->
+                 <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-blue-400">
+                            📂 Sumber Kata
+                        </label>
+                        <select id="source-select" class="bg-slate-700 text-white text-xs font-bold py-1 px-2 rounded border border-slate-600" onchange="changeWordSource(this.value)">
+                            <option value="DEFAULT">Bawaan (Hardcode)</option>
+                            <option value="LOCAL">File (targets_idn.txt/valid_idn.txt)</option>
+                        </select>
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Butuh file targets_[lang].txt & valid_[lang].txt</p>
+                </div>
+
+                <!-- Endless Mode Toggle -->
+                <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-cyan-300">
+                            ∞ Mode Tanpa Batas
+                        </label>
+                        <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="endless-toggle" id="endless-toggle" class="toggle-checkbox cyan-switch absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer right-6 top-1 checked:right-1 transition-all duration-300" onchange="toggleEndlessMode(this.checked)" checked/>
+                            <label for="endless-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Matikan untuk main Klasik (Max 6 tebakan).</p>
+                </div>
+
+                <!-- Comment Style Toggle -->
+                <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-purple-400">
+                            🎭 Gaya Komentar
+                        </label>
+                        <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="comment-style-toggle" id="comment-style-toggle" class="toggle-checkbox purple-switch absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer right-6 top-1 checked:right-1 transition-all duration-300" onchange="toggleCommentStyle(this.checked)"/>
+                            <label for="comment-style-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                        </div>
+                    </div>
+                    <p id="style-desc" class="text-[10px] text-slate-500 italic">Mode: Ngegas/Marah (Default)</p>
+                </div>
+                
+                <!-- TTS Toggle -->
+                <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-pink-400">
+                            🗣️ Suara (TTS)
+                        </label>
+                        <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="tts-toggle" id="tts-toggle" class="toggle-checkbox pink-switch absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer right-6 top-1 checked:right-1 transition-all duration-300" onchange="toggleTTS(this.checked)" checked/>
+                            <label for="tts-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Bacakan pesan error & pemenang.</p>
+                </div>
+
+                <!-- Dictionary Check Toggle -->
+                <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-amber-400">
+                            📚 Cek Kamus
+                        </label>
+                        <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="dict-toggle" id="dict-toggle" class="toggle-checkbox amber-switch absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer right-6 top-1 checked:right-1 transition-all duration-300" onchange="toggleDictionaryCheck(this.checked)" checked/>
+                            <label for="dict-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Matikan jika ingin tebak kata apa saja.</p>
+                </div>
+
+                <!-- Hard Mode -->
+                <div class="pt-2 border-t border-slate-700 mt-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-sm font-bold text-slate-200 uppercase flex items-center gap-2 text-rose-400">
+                            💀 Hard Mode
+                        </label>
+                        <div class="relative inline-block w-10 h-6 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="hard-toggle" id="hard-toggle" class="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer right-6 top-1 checked:right-1 transition-all duration-300" onchange="toggleHardMode(this.checked)"/>
+                            <label for="hard-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 italic">Salah huruf = Dimarahin!</p>
+                </div>
+            </div>
+            <button onclick="closeModal('settingsModal')" class="mt-8 w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold text-white transition">Tutup</button>
+        </div>
+    </div>
+
+    <!-- RESULT MODAL -->
+    <div id="resultModal" class="modal-overlay">
+        <div class="modal-content relative overflow-hidden bg-slate-800 border-2 border-yellow-500/50 flex flex-col justify-between" style="max-height: 85vh;">
+            
+            <!-- WINNER SECTION (Top) -->
+            <div class="flex-shrink-0">
+                <div id="result-icon" class="text-6xl mb-2 animate-bounce relative z-10">🎉</div>
+                
+                <div id="winner-container" class="hidden mb-3 relative z-10">
+                    <div class="relative inline-block">
+                        <img id="winner-avatar" src="" class="w-20 h-20 rounded-full border-4 border-yellow-400 mx-auto glow-avatar object-cover bg-slate-700">
+                        <div class="absolute -bottom-2 -right-2 bg-yellow-400 text-black text-xs font-black px-3 py-1 rounded-full border border-white shadow">WIN</div>
+                    </div>
+                    <div class="mt-2">
+                        <div id="winner-name" class="text-xl font-black text-yellow-400 uppercase tracking-wide drop-shadow-md truncate max-w-[200px] mx-auto">NICKNAME</div>
+                        <div id="winner-msg" class="text-xs font-bold text-white italic mt-1 px-4 bg-white/10 rounded py-1 inline-block">"Menang cuy!"</div>
+                    </div>
+                </div>
+
+                <div class="text-slate-400 text-[10px] font-bold uppercase relative z-10">Kata Rahasia</div>
+                <div id="result-word" class="text-3xl font-black text-cyan-400 mb-3 tracking-widest relative z-10 drop-shadow-lg">KATLA</div>
+            </div>
+            
+            <!-- LEADERBOARD & INTERMISSION (Bottom / "Bareng") -->
+            <div id="intermission-container" class="hidden flex-col gap-2 w-full relative z-10 border-t border-white/10 pt-3 mt-1">
+                
+                <!-- LEADERBOARD -->
+                <div id="leaderboard-section" class="w-full bg-slate-900/50 rounded-xl p-2 border border-white/5">
+                    <h3 class="text-[10px] font-bold text-yellow-400 uppercase tracking-widest text-center mb-2 border-b border-white/5 pb-1 flex justify-between items-center">
+                        <span>🏆 RANKING</span>
+                        <span class="text-slate-500">Live Session</span>
+                        <!-- RESET BUTTON ADDED -->
+                        <button onclick="resetLeaderboard()" class="text-[8px] bg-red-900/50 text-red-400 px-2 py-0.5 rounded hover:bg-red-800 transition">RESET</button>
+                    </h3>
+                    <div id="leaderboard-list" class="space-y-1 overflow-y-auto max-h-[120px] pr-1">
+                        <!-- Items -->
+                    </div>
+                </div>
+
+                <!-- TAP TAP / GIFT PROMPT (REPLACED TIMER) -->
+                <div id="live-like-progress" class="w-full bg-slate-900 p-3 rounded-lg border border-white/10">
+                   <!-- Gift Animation Box -->
+                   <div class="gift-action-box p-2 rounded-lg mb-2 text-center animate-bounce">
+                        <span class="text-xs font-black text-white uppercase drop-shadow-md">
+                            🎁 KIRIM 1 GIFT (MAWAR) = RESET! 🎁
+                        </span>
+                   </div>
+                   
+                   <div class="text-[10px] text-yellow-400 font-bold mb-1 uppercase flex justify-between">
+                      <span class="animate-pulse">👉 ATAU TAP LAYAR / LIKE!</span>
+                      <span id="like-counter-text">0 / 500</span>
+                   </div>
+                   <div class="w-full bg-slate-700 rounded-full h-3 overflow-hidden relative mb-2">
+                      <div id="like-progress-bar" class="h-full w-0 bg-yellow-400 transition-all duration-300"></div>
+                   </div>
+                   
+                   <div class="text-center text-[10px] text-slate-500 italic">
+                       Menunggu interaksi penonton...
+                   </div>
+                </div>
+            </div>
+
+            <!-- SOLO PLAY BUTTON -->
+            <button id="btn-play-again" onclick="resetGame()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-white mt-4 hidden">MAIN LAGI</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME CONFIG ---
+        const CONFIG = {
+            lang: 'IDN',
+            wordLength: 5,
+            maxGuesses: 6,
+            enableTTS: true,
+            wordSource: 'DEFAULT',
+            checkDictionary: true,
+            hardMode: false,
+            endlessMode: true,
+            commentStyle: 'TOXIC'
+        };
+
+        // PESAN NATURAL (DENGAN PLACEHOLDER {c} dan {name})
+        const MESSAGES = {
+            'IDN': {
+                'TOXIC': {
+                    HARD_MODE_GREEN: [
+                        "⚠️ Heh! Huruf {c} itu udah ijo, jangan digeser!", 
+                        "⚠️ Mata dipake! Huruf {c} tempatnya disitu!", 
+                        "Huruf {c} udah bener ijo, ngapain diubah?!",
+                        "Woy, huruf {c} jangan dipindah lagi!",
+                        "Udah dibilang huruf {c} itu tetep di situ!",
+                        "Dikunci woy huruf {c} nya! Jangan bandel."
+                    ],
+                    HARD_MODE_YELLOW: [
+                        "⚠️ Woy, huruf {c} itu kuning! Pake dong!", 
+                        "⚠️ Kuningnya mana? Huruf {c} ketinggalan tuh!", 
+                        "Dipake huruf yang kuningnya, pake huruf {c} woy!",
+                        "Huruf {c} wajib ada! Paham gak sih?",
+                        "Itu huruf {c} kemana? Harus dipake!"
+                    ],
+                    HARD_MODE_GRAY: [
+                        "⚠️ Huruf {c} itu udah abu, jangan dipake bambang!",
+                        "⚠️ Udah tau {c} salah, masih aja ditulis. Hadehh.",
+                        "Huruf {c} itu sampah! Buang!",
+                        "Ngeyel banget sih, {c} jangan dipake lagi!",
+                        "Move on woy dari huruf {c}!"
+                    ],
+                    NOT_IN_DICT: [
+                        "Gak ada di kamus! Typo apa ngarang?", 
+                        "Belajar ngetik dulu sana.", 
+                        "Kata apaan tuh? Gak kenal.", 
+                        "Cek KBBI dulu, jangan asal bunyi.",
+                        "Bahasa alien kah? Gak ngerti.",
+                        "Hah? Maksud lo apa ngetik gituan?"
+                    ],
+                    WIN: [
+                        "Yahh si {name} hoki doang ini mah!", 
+                        "Akhirnya bener juga {name}, kirain gak bisa.", 
+                        "Lumayan lah {name}, buat pemula.", 
+                        "Tebakan maut atau kebetulan doang ni {name}?",
+                        "Woy {name}, curang lu ya pake joki!",
+                        "Hoki banget lu {name}!",
+                        "Gila {name}, jago juga lu ternyata.",
+                        "Makan apa lu {name}? Kok pinter?",
+                        "Boleh juga nih si {name}."
+                    ]
+                },
+                'POLITE': {
+                    HARD_MODE_GREEN: [
+                        "⚠️ Maaf kak, huruf {c} posisinya sudah benar ya.", 
+                        "⚠️ Pertahankan huruf {c} di situ ya kak.", 
+                        "Huruf {c} jangan dipindah ya, sudah tepat.",
+                        "Yuk teliti lagi, huruf {c} tetap di tempat.",
+                        "Posisi huruf {c} sudah terkunci, jangan diganti ya."
+                    ],
+                    HARD_MODE_YELLOW: [
+                        "⚠️ Jangan lupa huruf {c} dipakai ya kak.", 
+                        "⚠️ Sayang banget petunjuk {c} terlewat.", 
+                        "Yuk dipakai huruf {c} nya sebagai petunjuk.",
+                        "Huruf {c} wajib ada di kata baru ya.",
+                        "Mohon sertakan huruf {c} nya kembali."
+                    ],
+                    HARD_MODE_GRAY: [
+                        "⚠️ Huruf {c} sebaiknya tidak dipakai lagi ya.",
+                        "⚠️ Coba hindari huruf {c} kak.",
+                        "Huruf {c} itu sudah salah, yuk cari huruf lain.",
+                        "Mari ganti huruf {c} dengan yang belum dicoba.",
+                        "Fokus ke huruf lain selain {c} ya."
+                    ],
+                    NOT_IN_DICT: [
+                        "Maaf, kata tersebut tidak ada di kamus.", 
+                        "Sepertinya ada salah ketik ya kak?", 
+                        "Coba cari kata lain yang lebih umum.", 
+                        "Kata ini belum terdaftar, yuk coba lagi.",
+                        "Mungkin maksud kakak kata lain?"
+                    ],
+                    WIN: [
+                        "Selamat {name}! Kamu hebat banget!", 
+                        "Luar biasa {name}! Cerdas sekali.", 
+                        "Keren banget {name}!", 
+                        "Wah, mantap jiwa {name}! Lanjutkan!",
+                        "Selamat ya {name}! Kamu pintar.",
+                        "Hebat {name}! Tebakan yang sangat akurat.",
+                        "Tepuk tangan buat {name}!",
+                        "Wah {name} jago banget mainnya."
+                    ]
+                }
+            },
+            'ENG': {
+                'TOXIC': {
+                    HARD_MODE_GREEN: [
+                        "⚠️ Are you colorblind? {c} stays there!", 
+                        "⚠️ Don't move the {c}! Are you serious?", 
+                        "Letter {c} is locked! Stop messing it up.",
+                        "Why move the {c}? Just why?"
+                    ],
+                    HARD_MODE_YELLOW: [
+                        "⚠️ Use letter {c}! Don't be wasteful.", 
+                        "⚠️ Clue {c} missing! Are you blind?", 
+                        "Don't forget {c}! Use your brain.",
+                        "Letter {c} must be used! It's a rule."
+                    ],
+                    HARD_MODE_GRAY: [
+                        "⚠️ Don't reuse {c}! It's dead.",
+                        "⚠️ Letter {c} is trash! Stop using it.",
+                        "Avoid {c}! How hard is that?",
+                        "Stop spamming {c}!"
+                    ],
+                    NOT_IN_DICT: [
+                        "Not in dictionary! Read a book.", 
+                        "Typo maybe? Fix your fingers.", 
+                        "What is that? Gibberish?",
+                        "Not a valid word. Try harder."
+                    ],
+                    WIN: [
+                        "{name} just got lucky, I bet.", 
+                        "Finally {name}! Took you long enough.", 
+                        "Not bad {name}, for a beginner.", 
+                        "Lucky guess {name}! Do it again if you can.",
+                        "Wow {name}, you actually got it.",
+                        "Seriously {name}? Just pure luck."
+                    ]
+                },
+                'POLITE': {
+                    HARD_MODE_GREEN: [
+                        "⚠️ Please keep the letter {c} there.", 
+                        "⚠️ Letter {c} is correct, kindly keep it.", 
+                        "Position of {c} is locked! Good job keeping it.",
+                        "Please don't move the correct letter {c}."
+                    ],
+                    HARD_MODE_YELLOW: [
+                        "⚠️ Please use the letter {c} clue.", 
+                        "⚠️ Don't forget the hint {c}, it helps!", 
+                        "Letter {c} is required for the next guess.",
+                        "Kindly include the letter {c}."
+                    ],
+                    HARD_MODE_GRAY: [
+                        "⚠️ Please avoid letter {c} in next guess.",
+                        "⚠️ Letter {c} is incorrect, try others.",
+                        "Let's try new letters instead of {c}.",
+                        "Kindly skip the letter {c}."
+                    ],
+                    NOT_IN_DICT: [
+                        "Not in dictionary, sorry about that.", 
+                        "Maybe a typo? Please check again.", 
+                        "Please try another word.",
+                        "That word is not on our list, sorry."
+                    ],
+                    WIN: [
+                        "Congratulations {name}! Amazing job!", 
+                        "Great job {name}! You are very smart.", 
+                        "Well done {name}! That was impressive.", 
+                        "Amazing guess {name}! Keep it up!",
+                        "So proud of you {name}!",
+                        "Nice one {name}!"
+                    ]
+                }
+            }
+        };
+
+        // --- TARGET WORDS (JAWABAN UTAMA) ---
+        const TARGET_WORDS = {
+            'IDN': {
+                4: ["BUKU", "MEJA", "LARI", "MAJU", "SUKA", "PAGI", "KOPI", "GULA", "BOLA", "HATI", "MATA", "KAKI", "JARI", "GIGI", "SUSU", "ROTI", "NASI", "IKAN", "AYAM", "SAPI", "KUDA", "RUSA", "ULAR", "BUAS", "JINAK", "LAMA", "BARU", "BIRU", "MERAH", "HIJAU", "EMAS", "KACA", "BATU", "DASI", "TOPI"],
+                5: ["KATLA", "HEBAT", "SUPER", "KEREN", "JUARA", "MANIS", "PEDAS", "ASIN", "VIRAL", "TIKTOK", "VIDEO", "LIVE", "ARTIS", "BUNDA", "CINTA", "KASIH", "SAYANG", "MARAH", "SEDDIH", "SENANG", "TAKUT", "BERANI", "KUAT", "LEMAH", "CEPAT", "LAMBAT", "TINGGI", "PENDEK", "BESAR", "KECIL", "HITAM", "PUTIH", "SIANG", "MALAM", "HUJAN"],
+                6: ["MENANG", "CANTIK", "GANTENG", "SUKSES", "TERBANG", "KETAWA", "MANTAP", "BINTANG", "PLANET", "LANGIT", "LAUTAN", "GUNUNG", "SAWAH", "HUTAN", "PANTAI", "SUNGAI", "DANAU", "KOLAM", "RUMAH", "SEKOLAH", "KANTOR", "PASAR", "TOKO", "WARUNG", "JALAN", "MOBIL", "MOTOR", "KERETA", "PESAWAT", "KAPAL", "SEPEDA", "BECAK", "BAWAH", "KANAN", "KIRI"],
+                7: ["BAHAGIA", "GEMBIRA", "BERSERI", "BERCAHAYA", "BINTANG", "PELANGI", "SEKOLAH", "KELUARGA", "SAHABAT", "TEMAN", "MUSUH", "LAWAN", "KAWAN", "SAUDARA", "KERABAT", "TETANGGA", "WARGA", "RAKYAT", "BANGSA", "NEGARA", "DUNIA", "SEMESTA", "ALAM", "LINGKUNGAN", "HIDUP", "MATI", "SEHAT", "SAKIT", "KUAT", "LEMAH", "PINTAR", "CERDAS", "BODOH", "RAJIN", "MALAS"],
+                8: ["SEMANGAT", "INTERNET", "KOMPUTER", "KERJASAMA", "INDONESIA", "MERDEKA", "PAHLAWAN", "PEJUANG", "PEMIMPIN", "PRESIDEN", "MENTERI", "GUBERNUR", "BUPATI", "WALIKOTA", "CAMAT", "LURAH", "KEPALA", "DESA", "KOTA", "PROVINSI", "PULAU", "JAWA", "SUMATERA", "KALIMANTAN", "SULAWESI", "PAPUA", "BALI", "LOMBOK", "FLORES", "TIMOR", "JAKARTA", "BANDUNG", "SURABAYA", "MEDAN", "MAKASSAR"]
+            },
+            'ENG': {
+                4: ["WORD", "GAME", "PLAY", "COOL", "GOOD", "LOVE", "LIFE", "TIME", "WORK", "HOME", "CITY", "TOWN", "ROAD", "PATH", "WAY", "DAY", "NIGHT", "SUN", "MOON", "STAR", "SKY", "SEA", "LAND", "FIRE", "WATER", "WIND", "RAIN", "SNOW", "COLD", "HOT"],
+                5: ["SUPER", "GREAT", "SMART", "BRAIN", "START", "HELLO", "WORLD", "PARTY", "GHOST", "SMILE", "HAPPY", "ANGRY", "SADLY", "CRY", "LAUGH", "WALK", "RUN", "JUMP", "FLY", "SWIM", "EAT", "DRINK", "SLEEP", "WAKE", "DREAM", "THINK", "KNOWN", "LEARN", "TEACH", "STUDY"],
+                6: ["WINNER", "PLAYER", "ACTION", "STREAM", "LOVELY", "FRIEND", "FAMILY", "SCHOOL", "OFFICE", "MARKET", "STORE", "SHOP", "HOUSE", "HOME", "GARDEN", "PARK", "FOREST", "BEACH", "RIVER", "LAKE", "POND", "POOL", "OCEAN", "DESERT", "FIELD", "FARM", "CITY", "TOWN", "VILLAGE", "WORLD"],
+                7: ["AWESOME", "SUCCESS", "PERFECT", "JOURNEY", "WELCOME", "GOODBYE", "MORNING", "EVENING", "TONIGHT", "TODAY", "TOMORROW", "YESTERDAY", "WEEKEND", "HOLIDAY", "VACATION", "TRAVEL", "TRIP", "TOUR", "VISIT", "STAY", "LIVE", "LOVE", "LIKE", "HATE", "WANT", "NEED", "HAVE", "GIVE", "TAKE", "MAKE"],
+                8: ["CHAMPION", "TOGETHER", "UNIVERSE", "INTERNET", "COMPUTER", "SOFTWARE", "HARDWARE", "NETWORK", "SYSTEM", "PROGRAM", "CODING", "GAMING", "PLAYING", "WINNING", "LOSING", "LEARNING", "TEACHING", "STUDYING", "READING", "WRITING", "SPEAKING", "LISTENING", "WATCHING", "LOOKING", "SEEING", "HEARING", "FEELING", "TOUCHING", "SMELLING", "TASTING"]
+            }
+        };
+
+        // --- VALIDATION POOL (KAMUS BESAR - CAMPUR SEMUA) ---
+        const VALIDATION_POOL = {
+            'IDN': [
+                "ADAB", "ABAI", "ACAR", "ADIK", "AGAR", "AJAK", "AKAL", "AKAN", "AKAR", "AKSI", "AKUN", "ALAM", "ALAT", "ALIS", "ALUR", "AMAL", "AMAN", "AMAT", "AMIS", "ANAK", "ANEH", "ANGSA", "APEL", "ARAH", "ARUS", "ASAM", "ASAP", "ASLI", "ATAP", "ATAS", "ATUR", "AWAL", "AWAN", "AYAH", "BACA", "BAGI", "BAHU", "BAIK", "BAJU", "BAKA",
+                "ABADI", "ABANG", "ABJAD", "ABSEN", "ACARA", "ADIL", "ADMIN", "AGAMA", "AJAIB", "AJAR", "AKHIR", "AKSES", "AKTIF", "AKTOR", "AKUR", "ALAMI", "ALAS", "ALIH", "ALIR", "ALIS", "ALUN", "AMAL", "AMAN", "AMBIL", "AMPUN", "ANAK", "ANDAI", "ANEH", "ANGIN", "ANGKA",
+                "ABAIKAN", "ADANYA", "ADIKKU", "AGAMA", "AJAKAN", "AKIBAT", "AKSI", "ALASAN", "ALATNYA", "ALIRAN", "AMALAN", "AMANAH", "AMBIL", "AMPUNI", "ANAKNYA", "ANCAMAN", "ANGGUR", "ANGKAT", "ANJING", "ANTARA",
+                "ABAIKAN", "ADALAH", "ADIKMU", "AGAMA", "AGUSTUS", "AKHIRNYA", "AKIBAT", "AKTIF", "ALAMAT", "ALASAN", "ALIRAN", "AMALAN", "AMANAT", "AMBIL", "AMPUNI", "ANAKMU", "ANGGOTA", "ANGKAT", "ANTARA", "APAPUN",
+                "ABAIKAN", "AKTIVITAS", "ALASANNYA", "ALATNYA", "AMALANNYA", "AMANAHNYA", "ANAKANAK", "ANCAMANNYA", "ANGGARAN", "ANGGOTA", "ANGKATAN", "ANTARNYA", "APLIKASI", "APRIL", "ARAHANNYA", "ARTIKEL", "ASALNYA", "ASING", "ASOSIASI", "ATURANNYA"
+            ],
+            'ENG': [
+                "ABLE", "ACID", "AGED", "ALSO", "AREA", "ARMY", "ATOM", "BABY", "BACK", "BALL",
+                "ABOUT", "ABOVE", "ACTOR", "ACUTE", "ADMIT", "ADOPT", "ADULT", "AFTER", "AGAIN", "AGENT",
+                "ABROAD", "ACCEPT", "ACCESS", "ACROSS", "ACTING", "ACTION", "ACTIVE", "ACTUAL", "ADVICE", "ADVISE",
+                "ABILITY", "ABSENCE", "ACADEMY", "ACCOUNT", "ACCUSED", "ACHIEVE", "ACQUIRE", "ADDRESS", "ADVANCE", "ADVERSE",
+                "ABSOLUTE", "ABSTRACT", "ACADEMIC", "ACCEPTED", "ACCIDENT", "ACCURACY", "ACCURATE", "ACHIEVED", "ACQUIRED", "ACTIVITY"
+            ]
+        };
+
+        let state = {
+            secretWord: '',
+            grid: [],
+            currentRow: 0,
+            currentCol: 0,
+            status: 'menu',
+            dictionary: [], // Targets only
+            validDictionary: [], // Targets + Others (For validation)
+            rawLocalTargets: null, // NEW: Store raw targets from file
+            rawLocalValid: null, // NEW: Store raw valid words from file
+            hardModeConstraints: { correct: [], present: new Set(), absent: new Set() },
+            isLiveMode: false,
+            liveProvider: 'INDOFINITY', // 'INDOFINITY' or 'BACKEND'
+            liveQueue: [],
+            liveSocket: null,
+            liveSocketIO: null, // For custom backend
+            isProcessingQueue: false,
+            lastGuesser: null,
+            liveTargetLikes: 500,
+            liveCurrentLikes: 0,
+            isWaitingForLikes: false,
+            leaderboard: [], 
+            userStreaks: {}, 
+            bannedUsers: [], 
+            nextRoundBans: [],
+            guessedWords: new Set() // NEW: Track words guessed in current round
+        };
+
+        // SAFETY HELPERS FOR DOM ACCESS
+        function safeRemoveClass(id, cls) {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove(cls);
+        }
+        function safeAddClass(id, cls) {
+            const el = document.getElementById(id);
+            if (el) el.classList.add(cls);
+        }
+
+        const $ = (s) => document.querySelector(s);
+        const gridContainer = $('#grid-container');
+        const keyboardContainer = $('#keyboard-container');
+        const mainMenu = $('#main-menu');
+        const gameScreen = $('#game-screen');
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Load Dictionary (Local First)
+            const saved = localStorage.getItem('katla_live_leaderboard');
+            if (saved) state.leaderboard = JSON.parse(saved);
+
+            await loadDictionary();
+            autoDetectIP();
+            $('#loading').classList.add('opacity-0', 'pointer-events-none');
+            document.addEventListener('keydown', (e) => {
+                if (state.status !== 'playing' || state.isLiveMode) return;
+                const key = e.key.toUpperCase();
+                if (key === 'BACKSPACE') handleInput('⌫');
+                else if (key === 'ENTER') handleInput('ENTER');
+                else if (/^[A-Z]$/.test(key)) handleInput(key);
+            });
+            renderKeyboard();
+            
+            // Pre-load voices if possible
+            if(window.speechSynthesis) {
+                window.speechSynthesis.getVoices();
+            }
+        });
+
+        // --- TTS HELPER FUNCTION ---
+        function speak(text) {
+            if (!CONFIG.enableTTS) return;
+            if (!('speechSynthesis' in window)) return;
+
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            
+            utterance.lang = CONFIG.lang === 'IDN' ? 'id-ID' : 'en-US';
+            utterance.rate = 1.1; 
+            utterance.pitch = 1.0;
+
+            const voices = window.speechSynthesis.getVoices();
+            const targetLang = CONFIG.lang === 'IDN' ? 'id' : 'en';
+            
+            const googleVoice = voices.find(v => v.name.includes("Google") && v.lang.includes(targetLang));
+            if (googleVoice) {
+                utterance.voice = googleVoice;
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function toggleTTS(checked) {
+            CONFIG.enableTTS = checked;
+            if(checked) speak("Tes suara aktif");
+        }
+
+        function toggleChromaKey() { document.body.classList.toggle('chroma-mode'); }
+        function autoDetectIP() { const host = window.location.hostname; $('#conn-ip').value = (host && host !== '') ? host : 'localhost'; }
+        function openLiveSetup() { openModal('liveSetupModal'); }
+        
+        function showSettings() { 
+            const inp = document.getElementById('settings-len-input');
+            if(inp) inp.value = CONFIG.wordLength;
+            openModal('settingsModal'); 
+        }
+
+        // --- NEW: TOGGLE PROVIDER SETTINGS ---
+        function toggleProviderSettings() {
+            const provider = document.getElementById('conn-provider').value;
+            const portInput = document.getElementById('conn-port');
+            const hint = document.getElementById('setup-hint');
+            const backendUserGroup = document.getElementById('backend-user-group');
+
+            if (provider === 'INDOFINITY') {
+                portInput.value = '62024';
+                hint.innerHTML = '<b>Tips IndoFinity:</b> Pastikan aplikasi sudah "Listening".';
+                backendUserGroup.classList.add('hidden');
+            } else {
+                portInput.value = '3000';
+                hint.innerHTML = '<b>Tips Backend:</b> Pastikan `node server.js` sudah jalan.';
+                backendUserGroup.classList.remove('hidden');
+            }
+        }
+
+        async function startLiveMode() {
+            closeModal('liveSetupModal');
+            
+            const lenInput = document.getElementById('live-len-input');
+            const len = lenInput ? (parseInt(lenInput.value) || 5) : 5;
+            await applyLen(len);
+            
+            state.isLiveMode = true;
+            
+            // Get Provider & Username
+            state.liveProvider = document.getElementById('conn-provider').value;
+            const backendUsername = document.getElementById('backend-username').value.trim();
+
+            const likesInput = document.getElementById('live-likes-target');
+            state.liveTargetLikes = likesInput ? (parseInt(likesInput.value) || 500) : 500;
+            state.liveCurrentLikes = 0;
+            
+            safeRemoveClass('live-status-badge', 'hidden');
+            safeRemoveClass('live-queue-display', 'hidden');
+            safeAddClass('keyboard-container', 'hidden');
+            safeRemoveClass('live-keyboard-blocker', 'hidden');
+            
+            updateLiveHardWarning();
+            
+            switchToGame();
+            
+            // Connect using selected provider
+            connectToLiveServer(backendUsername);
+        }
+
+        function startGameMode(mode) {
+            state.isLiveMode = false;
+            
+            safeAddClass('live-status-badge', 'hidden');
+            safeAddClass('live-queue-display', 'hidden');
+            safeAddClass('live-keyboard-blocker', 'hidden');
+            safeRemoveClass('keyboard-container', 'hidden');
+            
+            switchToGame();
+        }
+
+        function switchToGame() {
+            if (mainMenu) mainMenu.classList.add('hidden-screen');
+            if (gameScreen) {
+                gameScreen.classList.remove('hidden-screen');
+                gameScreen.classList.add('flex-screen');
+            }
+            resetGame();
+        }
+
+        function backToMenu() {
+            state.isLiveMode = false;
+            disconnectLiveServer();
+            if (gameScreen) {
+                gameScreen.classList.remove('flex-screen');
+                gameScreen.classList.add('hidden-screen');
+            }
+            if (mainMenu) mainMenu.classList.remove('hidden-screen');
+            closeModal('resultModal');
+        }
+
+        // --- NEW: UNIFIED CONNECTION FUNCTION ---
+        function connectToLiveServer(targetUsername = '') {
+            const ip = $('#conn-ip').value || 'localhost';
+            const port = $('#conn-port').value || '62024';
+            const liveText = $('#live-text');
+            const liveDot = $('#live-dot');
+
+            if (liveText) liveText.textContent = "CONNECTING...";
+            disconnectLiveServer(); // Clear previous connections
+
+            if (state.liveProvider === 'INDOFINITY') {
+                // --- INDOFINITY WEBSOCKET ---
+                try {
+                    state.liveSocket = new WebSocket(`ws://${ip}:${port}`);
+                    state.liveSocket.onopen = () => { 
+                        if (liveText) liveText.textContent = "INDOFINITY ON"; 
+                        if (liveDot) liveDot.classList.add('connected'); 
+                        showToast(`Connected to IndoFinity (${ip})`); 
+                    };
+                    state.liveSocket.onmessage = (msg) => { 
+                        try { handleLiveEvent(JSON.parse(msg.data)); } catch(e) {} 
+                    };
+                    state.liveSocket.onclose = () => { 
+                        if (liveText) liveText.textContent = "DISCONNECTED"; 
+                        if (liveDot) liveDot.classList.remove('connected'); 
+                    };
+                } catch(e) { showToast("Connection Failed"); }
+
+            } else {
+                // --- CUSTOM BACKEND SOCKET.IO ---
+                if (!targetUsername) {
+                    showToast("❌ Username TikTok Wajib Diisi!");
+                    return;
+                }
+                
+                try {
+                    // Connect to Node.js Backend
+                    state.liveSocketIO = io(`http://${ip}:${port}`);
+                    
+                    state.liveSocketIO.on('connect', () => {
+                        // Tell backend to switch username
+                        state.liveSocketIO.emit('change_username', targetUsername);
+                        if (liveText) liveText.textContent = "BACKEND ON";
+                        if (liveDot) liveDot.classList.add('connected');
+                        showToast(`Connected to Backend @${targetUsername}`);
+                    });
+
+                    // Map Backend Events to Game Logic
+                    state.liveSocketIO.on('new_guess', (data) => {
+                        // Convert structure to match IndoFinity style for code reuse
+                        handleLiveEvent({
+                            event: 'chat',
+                            data: {
+                                comment: data.word, // Backend sends pre-filtered word
+                                nickname: data.username,
+                                uniqueId: data.username,
+                                profilePictureUrl: data.picture
+                            }
+                        });
+                    });
+
+                    state.liveSocketIO.on('gift_event', (data) => {
+                        handleLiveEvent({
+                            event: 'gift',
+                            data: {
+                                giftName: data.giftName,
+                                repeatCount: data.amount || 1,
+                                uniqueId: data.username
+                            }
+                        });
+                    });
+                    
+                    state.liveSocketIO.on('status', (data) => {
+                         if (liveText) liveText.textContent = data.msg.substring(0, 15);
+                         if (data.type === 'error') showToast(`❌ ${data.msg}`);
+                         if (data.type === 'success') showToast(`✅ ${data.msg}`);
+                    });
+
+                    state.liveSocketIO.on('disconnect', () => {
+                        if (liveText) liveText.textContent = "DISCONNECTED"; 
+                        if (liveDot) liveDot.classList.remove('connected'); 
+                    });
+
+                } catch(e) {
+                    showToast("Backend Connection Failed");
+                }
+            }
+        }
+
+        function disconnectLiveServer() { 
+            if (state.liveSocket) {
+                state.liveSocket.close();
+                state.liveSocket = null;
+            }
+            if (state.liveSocketIO) {
+                state.liveSocketIO.disconnect();
+                state.liveSocketIO = null;
+            }
+        }
+
+        function handleLiveEvent(payload) {
+            const { event, data } = payload;
+            
+            // --- GIFT HANDLING (RESET TRIGGER) ---
+            if (event === 'gift') {
+                if (state.status === 'won' || state.status === 'lost') {
+                     triggerRestart();
+                     return;
+                }
+            }
+
+            if (event === 'like') {
+                const count = parseInt(data.likeCount) || 1; 
+                if (state.isWaitingForLikes) { state.liveCurrentLikes += count; updateLikeProgress(); }
+                return;
+            }
+            if (event === 'chat') {
+                const nickname = data.nickname || data.uniqueId;
+                const uniqueId = data.uniqueId || nickname; 
+
+                if (state.bannedUsers.includes(uniqueId)) {
+                    return; 
+                }
+
+                // --- COMMAND HANDLING (!myrank) ---
+                const rawComment = data.comment.trim();
+                if (rawComment.toLowerCase() === '!myrank') {
+                    const userIdx = state.leaderboard.findIndex(u => u.userId === uniqueId);
+                    if (userIdx !== -1) {
+                        const stats = state.leaderboard[userIdx];
+                        showRankPopup(nickname, stats.pic, userIdx + 1, stats.wins);
+                    } else {
+                        showToast(`@${nickname} Belum masuk Leaderboard!`);
+                    }
+                    return; 
+                }
+
+                if (state.status === 'playing') {
+                    let text = rawComment.toUpperCase().replace(/[^A-Z]/g, '');
+
+                    // FIX: Check Duplicate Guesses EARLY
+                    if (state.guessedWords.has(text)) {
+                        return; 
+                    }
+
+                    if (text.length === CONFIG.wordLength) {
+                        addToLiveQueue(text, nickname, data.profilePictureUrl, uniqueId);
+                    }
+                }
+            }
+        }
+
+        function addToLiveQueue(word, user, pic, userId) {
+            // Also check queue for duplicates
+            if (!state.liveQueue.some(q => q.word === word)) {
+                state.liveQueue.push({ word, name: user, pic, userId }); // Store userId
+                updateQueueDisplay();
+                processLiveQueue();
+            }
+        }
+
+        async function processLiveQueue() {
+            if (state.isProcessingQueue || state.status !== 'playing' || state.liveQueue.length === 0) return;
+            state.isProcessingQueue = true;
+            const item = state.liveQueue.shift();
+            
+            // Double check duplicate before processing (in case it slipped in)
+            if (state.guessedWords.has(item.word)) {
+                 state.isProcessingQueue = false;
+                 updateQueueDisplay();
+                 processLiveQueue(); // Skip to next
+                 return;
+            }
+
+            updateQueueDisplay();
+            
+            // LOGIKA TURBO MODE
+            const qLen = state.liveQueue.length;
+            const isSuperTurbo = qLen > 10; 
+            const isTurbo = qLen > 2;       
+
+            const typeDelay = isSuperTurbo ? 0 : (isTurbo ? 10 : 50); 
+            const flipStagger = isSuperTurbo ? 30 : (isTurbo ? 80 : 200); 
+            const readBuffer = isSuperTurbo ? 200 : (isTurbo ? 600 : 1500); 
+            const enableErrorTTS = !isTurbo; 
+
+            state.lastGuesser = { name: item.name, pic: item.pic || `https://ui-avatars.com/api/?name=${item.name}`, userId: item.userId };
+            const row = state.currentRow;
+            
+            for (let i = 0; i < CONFIG.wordLength; i++) {
+                state.grid[row][i] = item.word[i];
+                const tile = document.getElementById(`tile-${row}-${i}`);
+                if (tile) { tile.textContent = item.word[i]; tile.setAttribute('data-state', 'active'); }
+                if(!isSuperTurbo && typeDelay > 0) await new Promise(r => setTimeout(r, typeDelay));
+            }
+            state.currentCol = CONFIG.wordLength;
+            showGuesserBadge(row, item.name, state.lastGuesser.pic);
+            
+            submitGuess(true, flipStagger, enableErrorTTS);
+            
+            const totalDelay = (CONFIG.wordLength * flipStagger) + readBuffer;
+            setTimeout(() => { state.isProcessingQueue = false; processLiveQueue(); }, totalDelay);
+        }
+
+        function updateQueueDisplay() {
+            const countEl = $('#queue-count');
+            const statusEl = $('#queue-status');
+            
+            if (countEl) {
+                countEl.textContent = state.liveQueue.length;
+                if (state.liveQueue.length >= 50) {
+                    countEl.classList.add('text-red-500'); 
+                } else {
+                    countEl.classList.remove('text-red-500');
+                }
+            }
+
+            if (statusEl) {
+                if (state.liveQueue.length > 3) statusEl.classList.remove('hidden');
+                else statusEl.classList.add('hidden');
+            }
+        }
+
+        function showGuesserBadge(rowIndex, name, picUrl) {
+            const rowStart = document.getElementById(`tile-${rowIndex}-0`);
+            if (!rowStart) return;
+            
+            if (rowStart.querySelector('.guesser-badge')) return;
+
+            const badge = document.createElement('div');
+            badge.className = 'guesser-badge';
+            
+            badge.innerHTML = `
+                <img src="${picUrl}" class="guesser-avatar" onerror="this.src='https://ui-avatars.com/api/?name=${name}'">
+                <span class="guesser-name">${name}</span>
+            `;
+            
+            rowStart.appendChild(badge);
+            rowStart.style.zIndex = '50';
+        }
+
+        // --- NEW RANK POPUP FUNCTION ---
+        function showRankPopup(name, picUrl, rank, wins) {
+            const container = document.getElementById('rank-popup-area');
+            if (!container) return;
+
+            const popup = document.createElement('div');
+            popup.className = 'rank-popup-card';
+            
+            let trophy = '#'+rank;
+            if (rank === 1) trophy = '🥇';
+            if (rank === 2) trophy = '🥈';
+            if (rank === 3) trophy = '🥉';
+
+            popup.innerHTML = `
+                <div class="rank-avatar-container">
+                    <img src="${picUrl}" class="rank-avatar" onerror="this.src='https://ui-avatars.com/api/?name=${name}'">
+                    <div class="rank-badge-icon">${trophy}</div>
+                </div>
+                <div class="rank-info">
+                    <div class="rank-title">LEADERBOARD RANK</div>
+                    <div class="rank-user">${name}</div>
+                    <div class="rank-stats">🏆 ${wins} Total Wins</div>
+                </div>
+            `;
+            
+            container.appendChild(popup);
+            setTimeout(() => {
+                if(popup.parentElement) popup.remove();
+            }, 4000);
+        }
+
+        async function loadDictionary() {
+            const lang = CONFIG.lang.toLowerCase();
+            const targetFile = `targets_${lang}.txt`;
+            const validFile = `valid_${lang}.txt`;
+            
+            if (CONFIG.wordSource === 'LOCAL') {
+                try {
+                    const resTargets = await fetch(targetFile);
+                    if (resTargets.ok) {
+                         const textT = await resTargets.text();
+                         state.rawLocalTargets = textT.split(/\r?\n/).map(w => w.trim().toUpperCase()).filter(w => w.length > 0);
+                         showToast(`✅ ${targetFile} loaded!`);
+                    } else {
+                         throw new Error("Target file missing");
+                    }
+
+                    try {
+                        const resValid = await fetch(validFile);
+                        if (resValid.ok) {
+                            const textV = await resValid.text();
+                            state.rawLocalValid = textV.split(/\r?\n/).map(w => w.trim().toUpperCase()).filter(w => w.length > 0);
+                            showToast(`✅ ${validFile} loaded!`);
+                        } else {
+                             state.rawLocalValid = []; 
+                             console.warn("Validation file missing, using targets only");
+                        }
+                    } catch(e) {
+                         state.rawLocalValid = [];
+                    }
+                    
+                    processDictionary();
+                    return;
+                } catch (e) {
+                    console.error("Local Load Error", e);
+                    showToast(`❌ Gagal: ${targetFile}. Pake Bawaan.`);
+                }
+            }
+            // Fallback or Default
+            console.log("Loading Hardcoded Dictionary...");
+            state.rawLocalTargets = null;
+            state.rawLocalValid = null;
+            processDictionary();
+        }
+
+        function processDictionary() {
+            const targetLength = CONFIG.wordLength;
+
+            if (CONFIG.wordSource === 'LOCAL' && state.rawLocalTargets) {
+                const targets = state.rawLocalTargets.filter(w => w.length === targetLength);
+                let valids = [];
+                
+                if (state.rawLocalValid && state.rawLocalValid.length > 0) {
+                     valids = state.rawLocalValid.filter(w => w.length === targetLength);
+                }
+                
+                if (targets.length > 0) {
+                    state.dictionary = targets;
+                    const combined = new Set([...targets, ...valids]);
+                    state.validDictionary = Array.from(combined);
+                } else {
+                     const gen = "FILE" + "X".repeat(Math.max(0, targetLength - 4));
+                     state.dictionary = [gen];
+                     state.validDictionary = [gen];
+                     showToast(`⚠️ File kosong untuk ${targetLength} huruf`);
+                }
+                return;
+            }
+
+            const rawTargets = TARGET_WORDS[CONFIG.lang];
+            
+            if (rawTargets && rawTargets[targetLength]) {
+                state.dictionary = rawTargets[targetLength].map(w => w.toUpperCase());
+            } else {
+                const gen = "GAME" + "X".repeat(Math.max(0, targetLength - 4));
+                state.dictionary = [gen]; 
+            }
+
+            const validPool = VALIDATION_POOL[CONFIG.lang] || [];
+            const filteredValid = validPool.filter(w => w.length === targetLength);
+            const combined = new Set([...state.dictionary, ...filteredValid]);
+            state.validDictionary = Array.from(combined);
+        }
+
+        function initGame() {
+            state.bannedUsers = [...state.nextRoundBans];
+            state.nextRoundBans = [];
+            state.guessedWords = new Set();
+            
+            if (state.bannedUsers.length > 0) {
+                showToast(`⛔ Cooldown: ${state.bannedUsers.length} Pemain sedang istirahat`);
+            }
+
+            state.currentRow = 0; state.currentCol = 0; state.status = 'playing';
+            let initialRows = CONFIG.endlessMode ? CONFIG.maxGuesses : CONFIG.maxGuesses; 
+            
+            state.grid = Array(initialRows).fill().map(() => Array(CONFIG.wordLength).fill(''));
+            
+            state.hardModeConstraints = { correct: Array(CONFIG.wordLength).fill(null), present: new Set(), absent: new Set() };
+            state.liveQueue = []; state.isWaitingForLikes = false; 
+            
+            if (state.dictionary.length) {
+                state.secretWord = state.dictionary[Math.floor(Math.random() * state.dictionary.length)];
+            } else {
+                state.secretWord = "KATLA"; 
+            }
+
+            if (state.secretWord.length !== CONFIG.wordLength) {
+                console.warn(`Word length mismatch! Expected ${CONFIG.wordLength}, got ${state.secretWord.length}. Generating fallback.`);
+                let fixWord = "GAME";
+                while(fixWord.length < CONFIG.wordLength) fixWord += "X";
+                if(fixWord.length > CONFIG.wordLength) fixWord = fixWord.substring(0, CONFIG.wordLength);
+                state.secretWord = fixWord;
+            }
+
+            renderGrid();
+            if(!state.isLiveMode) renderKeyboard();
+        }
+
+        function renderGrid() {
+            gridContainer.innerHTML = '';
+            
+            gridContainer.style.gridTemplateColumns = `repeat(${CONFIG.wordLength}, minmax(0, 1fr))`;
+            
+            let sizeClass = CONFIG.wordLength > 8 ? 'max-w-full' : 'max-w-md';
+            gridContainer.className = `grid gap-1.5 w-full mx-auto ${sizeClass}`;
+            
+            let fontSize = '2rem';
+            if (CONFIG.wordLength >= 8) fontSize = '1.25rem'; 
+            else if (CONFIG.wordLength >= 7) fontSize = '1.5rem'; 
+            else if (CONFIG.wordLength === 6) fontSize = '1.75rem';
+
+            if (window.innerWidth < 400 && CONFIG.wordLength > 6) fontSize = '1rem';
+
+            state.grid.forEach((row, r) => {
+                row.forEach((_, c) => {
+                    const tile = document.createElement('div');
+                    tile.className = 'tile';
+                    tile.id = `tile-${r}-${c}`;
+                    tile.style.fontSize = fontSize;
+                    gridContainer.appendChild(tile);
+                });
+            });
+        }
+        
+        function renderKeyboard() {
+            const layout = [['Q','W','E','R','T','Y','U','I','O','P'], ['A','S','D','F','G','H','J','K','L'], ['ENTER','Z','X','C','V','B','N','M','⌫']];
+            keyboardContainer.innerHTML = '';
+            layout.forEach(row => {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'keyboard-row';
+                row.forEach(key => {
+                    const btn = document.createElement('button');
+                    btn.className = 'key';
+                    btn.textContent = key === '⌫' ? '' : key;
+                    if (key === 'ENTER' || key === '⌫') btn.classList.add('large');
+                    if(key === '⌫') btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>`;
+                    btn.onclick = () => handleInput(key);
+                    btn.setAttribute('data-key', key);
+                    rowDiv.appendChild(btn);
+                });
+                keyboardContainer.appendChild(rowDiv);
+            });
+        }
+        
+        function handleInput(key) {
+            if (state.status !== 'playing') return;
+            if (key === '⌫') deleteLetter();
+            else if (key === 'ENTER') submitGuess(false);
+            else addLetter(key);
+        }
+
+        function addLetter(letter) {
+            if (state.currentCol < CONFIG.wordLength) {
+                state.grid[state.currentRow][state.currentCol] = letter;
+                const tile = document.getElementById(`tile-${state.currentRow}-${state.currentCol}`);
+                if(tile) { tile.textContent = letter; tile.setAttribute('data-state', 'active'); }
+                state.currentCol++;
+            }
+        }
+
+        function deleteLetter() {
+            if (state.currentCol > 0) {
+                state.currentCol--;
+                state.grid[state.currentRow][state.currentCol] = '';
+                const tile = document.getElementById(`tile-${state.currentRow}-${state.currentCol}`);
+                if(tile) { tile.textContent = ''; tile.removeAttribute('data-state'); }
+            }
+        }
+
+        function addExtraRow() {
+            const r = state.grid.length;
+            state.grid.push(Array(CONFIG.wordLength).fill(''));
+            
+            let fontSize = '2rem';
+            if (CONFIG.wordLength >= 8) fontSize = '1.25rem'; 
+            else if (CONFIG.wordLength >= 7) fontSize = '1.5rem'; 
+            else if (CONFIG.wordLength === 6) fontSize = '1.75rem';
+            
+            for(let c=0; c<CONFIG.wordLength; c++) {
+                const tile = document.createElement('div');
+                tile.className = 'tile new-row-anim';
+                tile.id = `tile-${r}-${c}`;
+                tile.style.fontSize = fontSize;
+                gridContainer.appendChild(tile);
+            }
+            setTimeout(() => {
+                if (state.currentRow > 3) {
+                    const el = document.getElementById(`tile-${state.currentRow}-0`);
+                    if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+                }
+            }, 100);
+        }
+
+        function submitGuess(isAutomated, staggerDelay, enableErrorTTS = true) {
+            const guess = state.grid[state.currentRow].join('');
+            
+            if (state.guessedWords.has(guess)) {
+                shakeRow();
+                if(isAutomated) {
+                    const msg = "Kata sudah pernah ditebak!";
+                    showHardModeViolation(state.currentRow, state.lastGuesser.name, msg);
+                    if (enableErrorTTS) speak(msg);
+                } else {
+                    showToast("Kata sudah pernah ditebak!");
+                }
+                return false;
+            }
+
+            if (guess.length !== CONFIG.wordLength) {
+                shakeRow();
+                if (!isAutomated) showToast("Huruf kurang!");
+                return false;
+            }
+            if (CONFIG.checkDictionary && !state.validDictionary.includes(guess)) {
+                shakeRow();
+                const msg = getRandomMsg('NOT_IN_DICT');
+                if(isAutomated) {
+                    showHardModeViolation(state.currentRow, state.lastGuesser.name, msg);
+                    if (enableErrorTTS) speak(msg);
+                } else {
+                    showToast("Tidak ada di kamus");
+                }
+                return false;
+            }
+            if (CONFIG.hardMode) {
+                const violation = checkHardMode(guess);
+                if (violation) {
+                    shakeRow();
+                    if(isAutomated) {
+                        showHardModeViolation(state.currentRow, state.lastGuesser.name, violation);
+                        if (enableErrorTTS) speak(violation);
+                    } else {
+                        showToast(violation);
+                    }
+                    return false;
+                }
+            }
+            
+            state.guessedWords.add(guess);
+            
+            revealRow(guess, staggerDelay);
+            return true;
+        }
+
+        function checkHardMode(guess) {
+            for(let i=0; i<CONFIG.wordLength; i++) {
+                const c = state.hardModeConstraints.correct[i];
+                if(c && guess[i] !== c) {
+                     let msg = getRandomMsg('HARD_MODE_GREEN');
+                     return msg.replace('{c}', c);
+                }
+            }
+            
+            for(let c of state.hardModeConstraints.present) {
+                if(!guess.includes(c)) {
+                    let msg = getRandomMsg('HARD_MODE_YELLOW');
+                    return msg.replace('{c}', c);
+                }
+            }
+            
+            let grayViolations = new Set();
+            for(let i=0; i<guess.length; i++) {
+                const c = guess[i];
+                if(state.hardModeConstraints.absent.has(c)) {
+                    grayViolations.add(c);
+                }
+            }
+            
+            if (grayViolations.size > 0) {
+                let msg = getRandomMsg('HARD_MODE_GRAY');
+                const chars = Array.from(grayViolations).join(' ');
+                return msg.replace('{c}', chars);
+            }
+            
+            return null;
+        }
+
+        function revealRow(guess, stagger = 200) {
+            const row = state.currentRow;
+            const secret = state.secretWord.split('');
+            const guessArr = guess.split('');
+            const result = Array(CONFIG.wordLength).fill('absent');
+
+            guessArr.forEach((char, i) => {
+                if (char === secret[i]) {
+                    result[i] = 'correct';
+                    secret[i] = null;
+                    state.hardModeConstraints.correct[i] = char;
+                }
+            });
+            guessArr.forEach((char, i) => {
+                if (result[i] === 'correct') return;
+                if (secret.includes(char)) {
+                    result[i] = 'present';
+                    secret[secret.indexOf(char)] = null;
+                    state.hardModeConstraints.present.add(char);
+                }
+            });
+            
+            guessArr.forEach((char, i) => {
+                 if (result[i] === 'absent') {
+                     if (!state.secretWord.includes(char)) {
+                         state.hardModeConstraints.absent.add(char);
+                     }
+                 }
+            });
+
+            guessArr.forEach((char, i) => {
+                setTimeout(() => {
+                    const tile = document.getElementById(`tile-${row}-${i}`);
+                    if(tile) { tile.setAttribute('data-state', result[i]); tile.classList.add('reveal'); }
+                    if(!state.isLiveMode) updateKey(char, result[i]);
+                }, i * stagger);
+            });
+
+            setTimeout(() => {
+                if (guess === state.secretWord) {
+                    handleWin();
+                } else {
+                    state.currentRow++; state.currentCol = 0;
+                    
+                    if (CONFIG.endlessMode) {
+                         if (state.currentRow >= state.grid.length) {
+                             addExtraRow();
+                         }
+                    } else {
+                         if (state.currentRow >= CONFIG.maxGuesses) {
+                             handleLoss();
+                         }
+                    }
+                }
+            }, (CONFIG.wordLength * stagger) + 100);
+        }
+        
+        function updateKey(char, status) {
+            const btn = document.querySelector(`button[data-key="${char}"]`);
+            if(!btn) return;
+            const current = btn.getAttribute('data-state');
+            if (status === 'correct') btn.setAttribute('data-state', 'correct');
+            else if (status === 'present' && current !== 'correct') btn.setAttribute('data-state', 'present');
+            else if (status === 'absent' && current !== 'correct' && current !== 'present') btn.setAttribute('data-state', 'absent');
+        }
+
+        function handleWin() {
+            state.status = 'won';
+            let winMsg = ""; 
+
+            if (state.isLiveMode && state.lastGuesser) {
+                const user = state.lastGuesser;
+                
+                Object.keys(state.userStreaks).forEach(key => {
+                    if (key !== user.userId) {
+                        state.userStreaks[key] = 0;
+                    }
+                });
+
+                if (!state.userStreaks[user.userId]) state.userStreaks[user.userId] = 0;
+                state.userStreaks[user.userId]++;
+
+                updateLeaderboard(user);
+
+                if (state.userStreaks[user.userId] >= 3) {
+                    state.nextRoundBans.push(user.userId);
+                    state.userStreaks[user.userId] = 0; 
+                    showToast(`⛔ ${user.name} Menang 3x! Istirahat 1 Ronde!`);
+                    winMsg = `Hebat ${user.name}! Tapi istirahat dulu satu game ya!`;
+                } else {
+                    let rawMsg = getRandomMsg('WIN');
+                    winMsg = rawMsg.replace('{name}', user.name);
+                    if (!rawMsg.includes('{name}')) {
+                         winMsg = `${user.name}, ${winMsg}`;
+                    }
+                }
+                
+                speak(winMsg); 
+            }
+
+            setTimeout(() => {
+                const modal = $('#resultModal');
+                const winnerContainer = $('#winner-container');
+                const btnPlay = $('#btn-play-again');
+                const intermission = $('#intermission-container');
+
+                if (state.isLiveMode && state.lastGuesser) {
+                    winnerContainer.classList.remove('hidden');
+                    $('#winner-avatar').src = state.lastGuesser.pic;
+                    $('#winner-name').textContent = state.lastGuesser.name;
+                    $('#winner-msg').textContent = `"${winMsg}"`;
+                    
+                    if(winMsg.includes("Istirahat")) {
+                         $('#winner-msg').classList.add('text-red-400');
+                    } else {
+                         $('#winner-msg').classList.remove('text-red-400');
+                    }
+                    
+                    btnPlay.classList.add('hidden');
+                    renderLeaderboard();
+                    intermission.classList.remove('hidden');
+                    intermission.classList.add('flex'); 
+
+                    state.isWaitingForLikes = true; state.liveCurrentLikes = 0;
+                    updateLikeProgress(); 
+                } else {
+                    winnerContainer.classList.add('hidden');
+                    intermission.classList.add('hidden');
+                    intermission.classList.remove('flex');
+                    btnPlay.classList.remove('hidden');
+                    $('#result-icon').textContent = "🎉";
+                    $('#result-word').textContent = state.secretWord;
+                }
+                $('#result-word').textContent = state.secretWord;
+                openModal('resultModal');
+            }, 500);
+        }
+        
+        function handleLoss() {
+            state.status = 'lost';
+             setTimeout(() => {
+                const winnerContainer = $('#winner-container');
+                const btnPlay = $('#btn-play-again');
+                const intermission = $('#intermission-container');
+
+                winnerContainer.classList.add('hidden');
+                
+                if (state.isLiveMode) {
+                    renderLeaderboard();
+                    intermission.classList.remove('hidden');
+                    intermission.classList.add('flex');
+                    btnPlay.classList.add('hidden');
+                    state.isWaitingForLikes = true; state.liveCurrentLikes = 0;
+                    updateLikeProgress(); 
+                } else {
+                    intermission.classList.add('hidden');
+                    intermission.classList.remove('flex');
+                    btnPlay.classList.remove('hidden');
+                }
+
+                $('#result-icon').textContent = "💀";
+                $('#result-word').textContent = state.secretWord;
+                openModal('resultModal');
+            }, 500);
+        }
+
+        function updateLeaderboard(user) {
+            let existingIndex = state.leaderboard.findIndex(u => u.userId === user.userId);
+            
+            if (existingIndex === -1) {
+                existingIndex = state.leaderboard.findIndex(u => u.name === user.name);
+                if(existingIndex !== -1) {
+                    state.leaderboard[existingIndex].userId = user.userId;
+                }
+            }
+
+            if (existingIndex !== -1) {
+                state.leaderboard[existingIndex].wins++;
+                state.leaderboard[existingIndex].pic = user.pic; 
+                state.leaderboard[existingIndex].name = user.name; 
+            } else {
+                state.leaderboard.push({ userId: user.userId, name: user.name, pic: user.pic, wins: 1 });
+            }
+            
+            state.leaderboard.sort((a, b) => b.wins - a.wins);
+            
+            localStorage.setItem('katla_live_leaderboard', JSON.stringify(state.leaderboard));
+        }
+
+        function resetLeaderboard() {
+            state.leaderboard = [];
+            localStorage.removeItem('katla_live_leaderboard');
+            renderLeaderboard();
+            showToast("Leaderboard di-reset!");
+        }
+
+        function renderLeaderboard() {
+            const list = document.getElementById('leaderboard-list');
+            list.innerHTML = '';
+            
+            const top5 = state.leaderboard.slice(0, 5);
+            
+            top5.forEach((user, index) => {
+                const rankClass = index === 0 ? 'rank-1' : (index === 1 ? 'rank-2' : (index === 2 ? 'rank-3' : ''));
+                const medal = index === 0 ? '🥇' : (index === 1 ? '🥈' : (index === 2 ? '🥉' : `#${index+1}`));
+                
+                const isBanned = state.nextRoundBans.includes(user.userId) || state.bannedUsers.includes(user.userId);
+                
+                const row = document.createElement('div');
+                row.className = `leaderboard-row ${rankClass}`;
+                row.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-slate-400 w-5 text-center">${medal}</span>
+                        <img src="${user.pic}" class="w-6 h-6 rounded-full border border-white/20">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-white truncate max-w-[100px] text-xs">${user.name}</span>
+                            ${isBanned ? '<span class="text-[8px] text-red-400 font-bold uppercase">Istirahat 1 Ronde</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="text-yellow-400 font-black text-xs">${user.wins} Win</div>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        function shakeRow() {
+            for(let i=0; i<CONFIG.wordLength; i++) {
+                const tile = document.getElementById(`tile-${state.currentRow}-${i}`);
+                if(tile) { tile.classList.add('shake'); setTimeout(() => tile.classList.remove('shake'), 500); }
+            }
+        }
+
+        function showHardModeViolation(row, name, msg) {
+            const firstTile = document.getElementById(`tile-${row}-0`);
+            if(!firstTile) return;
+            const toast = document.createElement('div');
+            toast.className = 'hard-mode-toast';
+            toast.style.top = (firstTile.offsetTop + firstTile.offsetHeight + 10) + 'px';
+            toast.innerHTML = `<span class="text-yellow-300">@${name}</span> ${msg}`;
+            gridContainer.appendChild(toast);
+            setTimeout(() => toast.remove(), 2500);
+        }
+
+        function showToast(msg) {
+            const t = $('#toast'); t.textContent = msg; t.style.opacity = '1'; t.style.bottom = '150px';
+            setTimeout(() => { t.style.opacity = '0'; t.style.bottom = '120px'; }, 2000);
+        }
+
+        function getRandomMsg(type) {
+            const mode = CONFIG.commentStyle; 
+            const lang = CONFIG.lang;
+            const arr = MESSAGES[lang][mode][type];
+            if (!arr) return "Pesan error tidak ditemukan";
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function updateLikeProgress() {
+            const pct = Math.min((state.liveCurrentLikes / state.liveTargetLikes) * 100, 100);
+            $('#like-progress-bar').style.width = pct + '%';
+            $('#like-counter-text').textContent = `${state.liveCurrentLikes} / ${state.liveTargetLikes}`;
+            if (state.liveCurrentLikes >= state.liveTargetLikes) triggerRestart();
+        }
+
+        function triggerRestart() {
+            state.isWaitingForLikes = false;
+            closeModal('resultModal');
+            resetGame();
+        }
+
+        function resetGame() { closeModal('resultModal'); initGame(); }
+        function toggleHardMode(checked) { 
+            CONFIG.hardMode = checked;
+            updateLiveHardWarning();
+        }
+        
+        function toggleEndlessMode(checked) {
+            CONFIG.endlessMode = checked;
+        }
+
+        function toggleCommentStyle(checked) {
+            CONFIG.commentStyle = checked ? 'POLITE' : 'TOXIC';
+            const desc = document.getElementById('style-desc');
+            if(desc) desc.textContent = checked ? "Mode: Sopan Manis (Ramah)" : "Mode: Ngegas/Marah (Default)";
+        }
+
+        async function changeWordSource(val) {
+            if (val === CONFIG.wordSource) return;
+            CONFIG.wordSource = val;
+            await loadDictionary();
+            resetGame();
+        }
+
+        async function changeWordLength(val) {
+            const newLen = parseInt(val);
+            if (newLen === CONFIG.wordLength) return;
+            if (newLen < 4 || newLen > 8) return; 
+
+            CONFIG.wordLength = newLen;
+            
+            const liveInput = document.getElementById('live-len-input');
+            if(liveInput) liveInput.value = newLen;
+
+            await processDictionary();
+            resetGame(); 
+        }
+
+        async function applyLen(val) {
+            if (val == CONFIG.wordLength) return;
+            CONFIG.wordLength = parseInt(val);
+            
+            const settingsInput = document.getElementById('settings-len-input');
+            if(settingsInput) settingsInput.value = CONFIG.wordLength;
+
+            await processDictionary();
+        }
+
+        async function changeLang(lang) {
+            if(lang === CONFIG.lang) return;
+            CONFIG.lang = lang;
+            
+            const btnIdn = $('#btn-idn');
+            const btnEng = $('#btn-eng');
+            if(lang === 'IDN') {
+                btnIdn.className = "flex-1 py-2 rounded font-bold text-sm transition-all bg-cyan-600 text-white";
+                btnEng.className = "flex-1 py-2 rounded font-bold text-sm transition-all text-slate-400";
+            } else {
+                btnIdn.className = "flex-1 py-2 rounded font-bold text-sm transition-all text-slate-400";
+                btnEng.className = "flex-1 py-2 rounded font-bold text-sm transition-all bg-cyan-600 text-white";
+            }
+            
+            await loadDictionary();
+            if(state.status === 'playing') resetGame();
+        }
+
+        function toggleDictionaryCheck(checked) {
+            CONFIG.checkDictionary = checked;
+        }
+
+        function updateLiveHardWarning() {
+            const warning = document.getElementById('live-hard-warning');
+            if (warning) {
+                if (CONFIG.hardMode) warning.classList.remove('hidden');
+                else warning.classList.add('hidden');
+            }
+        }
+
+        function openModal(id) { document.getElementById(id).classList.add('open'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+    </script>
+</body>
+</html>
