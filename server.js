@@ -38,7 +38,7 @@ app.use(express.static(__dirname));
 app.get('/', (req, res) => {
     // PENTING: Pastikan nama file ini SAMA PERSIS dengan file HTML yang Anda upload.
     // Jika nama file Anda 'index.html', ganti 'kosong.html' menjadi 'index.html'
-    const htmlFile = 'kosong.html'; 
+    const htmlFile = 'index.html'; 
     
     res.sendFile(path.join(__dirname, htmlFile), (err) => {
         if (err) {
@@ -117,9 +117,10 @@ function connectToTikTok(username) {
             const isBanned = BANNED_WORDS.some(badWord => finalGuess.includes(badWord));
 
             if (!isBanned) {
-                console.log(`[TEBAK] ${data.uniqueId}: ${finalGuess}`);
+                console.log(`[TEBAK] ${data.uniqueId} (${data.nickname}): ${finalGuess}`);
                 io.emit('new_guess', {
-                    username: data.uniqueId,
+                    uniqueId: data.uniqueId, // Gunakan ini sebagai ID unik
+                    nickname: data.nickname, // Gunakan ini untuk display nama
                     word: finalGuess,
                     picture: data.profilePictureUrl
                 });
@@ -130,11 +131,23 @@ function connectToTikTok(username) {
     tiktokLiveConnection.on('gift', data => {
         if (data.giftType === 1 && !data.repeatEnd) return;
         io.emit('gift_event', {
-            username: data.uniqueId,
+            uniqueId: data.uniqueId,
+            nickname: data.nickname, // Kirim nickname gifter
             giftName: data.giftName,
             amount: data.repeatCount
         });
     });
+
+    // --- PERBAIKAN: EVENT LISTENER UNTUK LIKE ---
+    tiktokLiveConnection.on('like', data => {
+        io.emit('like', {
+            uniqueId: data.uniqueId,
+            nickname: data.nickname, // Kirim nickname yang like
+            likeCount: data.likeCount, 
+            totalLikeCount: data.totalLikeCount
+        });
+    });
+    // ---------------------------------------------
 
     tiktokLiveConnection.on('disconnected', () => {
         handleReconnect(username, "Terputus (Reconnecting...)");

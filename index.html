@@ -1321,12 +1321,25 @@
                             event: 'chat',
                             data: {
                                 comment: data.word, // Backend sends pre-filtered word
-                                nickname: data.username,
-                                uniqueId: data.username,
+                                nickname: data.nickname || data.username, // Display Name
+                                uniqueId: data.uniqueId || data.username, // Primary Key
                                 profilePictureUrl: data.picture
                             }
                         });
                     });
+
+                    // --- FIX: TAMBAHKAN LISTENER LIKE ---
+                    state.liveSocketIO.on('like', (data) => {
+                        handleLiveEvent({
+                            event: 'like',
+                            data: {
+                                likeCount: data.likeCount || 1, // Mengambil jumlah like dari event
+                                uniqueId: data.uniqueId || data.username,
+                                nickname: data.nickname || data.uniqueId
+                            }
+                        });
+                    });
+                    // ------------------------------------
 
                     state.liveSocketIO.on('gift_event', (data) => {
                         handleLiveEvent({
@@ -1334,7 +1347,8 @@
                             data: {
                                 giftName: data.giftName,
                                 repeatCount: data.amount || 1,
-                                uniqueId: data.username
+                                uniqueId: data.uniqueId || data.username,
+                                nickname: data.nickname || data.uniqueId
                             }
                         });
                     });
@@ -1384,9 +1398,11 @@
                 return;
             }
             if (event === 'chat') {
-                const nickname = data.nickname || data.uniqueId;
-                const uniqueId = data.uniqueId || nickname; 
+                // PRIORITASKAN DATA: Nickname untuk tampilan, UniqueId untuk Logika
+                const nickname = data.nickname || data.uniqueId; // Nama Bagus
+                const uniqueId = data.uniqueId || nickname;      // ID Unik (user123)
 
+                // Cek Ban berdasarkan Unique ID (bukan nickname, karena nickname bisa ganti)
                 if (state.bannedUsers.includes(uniqueId)) {
                     return; 
                 }
@@ -1394,10 +1410,12 @@
                 // --- COMMAND HANDLING (!myrank) ---
                 const rawComment = data.comment.trim();
                 if (rawComment.toLowerCase() === '!myrank') {
+                    // Cari rank berdasarkan Unique ID
                     const userIdx = state.leaderboard.findIndex(u => u.userId === uniqueId);
                     if (userIdx !== -1) {
                         const stats = state.leaderboard[userIdx];
-                        showRankPopup(nickname, stats.pic, userIdx + 1, stats.wins);
+                        // Tampilkan Popup dengan Nickname
+                        showRankPopup(stats.name, stats.pic, userIdx + 1, stats.wins);
                     } else {
                         showToast(`@${nickname} Belum masuk Leaderboard!`);
                     }
@@ -1413,6 +1431,7 @@
                     }
 
                     if (text.length === CONFIG.wordLength) {
+                        // Masukkan ke antrian dengan Nickname untuk tampilan, UniqueId untuk data
                         addToLiveQueue(text, nickname, data.profilePictureUrl, uniqueId);
                     }
                 }
