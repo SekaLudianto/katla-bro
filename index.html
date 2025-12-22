@@ -595,13 +595,17 @@
                 <!-- Backend Username (Hidden for IndoFinity) -->
                 <div id="backend-user-group" class="hidden">
                     <label class="block text-xs font-bold text-slate-300 mb-2 uppercase text-cyan-400">Target Username TikTok</label>
-                    <div class="flex gap-2">
-                        <span class="flex items-center justify-center bg-slate-700 px-3 rounded-lg text-slate-400 font-bold">@</span>
-                        <select id="backend-username" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-bold">
-                             <option value="ahmadsyams.live">ahmadsyams.live</option>
-                             <option value="arsenic.live">arsenic.live</option>
-                             <option value="sarimin.live">sarimin.live</option>
-                        </select>
+                    <div class="flex flex-col gap-2">
+                        <div class="flex gap-2">
+                             <span class="flex items-center justify-center bg-slate-700 px-3 rounded-lg text-slate-400 font-bold">@</span>
+                             <select id="backend-username-select" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-bold" onchange="toggleManualInput(this.value)">
+                                 <option value="ahmadsyams.live">ahmadsyams.live</option>
+                                 <option value="arsenic.live">arsenic.live</option>
+                                 <option value="sarimin.live">sarimin.live</option>
+                                 <option value="MANUAL" class="text-yellow-400 font-bold">-- INPUT MANUAL --</option>
+                            </select>
+                        </div>
+                        <input type="text" id="backend-username-manual" placeholder="Ketik username tiktok..." class="hidden w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white text-sm font-bold placeholder-slate-500 animate-pulse bg-slate-900 border-yellow-500/50">
                     </div>
                 </div>
 
@@ -1146,22 +1150,41 @@
             const backendUserGroup = document.getElementById('backend-user-group');
             const ipLabel = document.getElementById('conn-ip-label');
             const ipInput = document.getElementById('conn-ip');
+            const autoBtn = document.getElementById('btn-auto-ip');
 
             if (provider === 'INDOFINITY') {
                 portInput.parentElement.classList.remove('hidden');
                 portInput.value = '62024';
                 ipLabel.textContent = "IP Host (PC)";
                 ipInput.placeholder = "localhost";
+                autoBtn.classList.remove('hidden');
                 hint.innerHTML = '<b>Tips IndoFinity:</b> Pastikan aplikasi sudah "Listening".';
                 backendUserGroup.classList.add('hidden');
             } else {
-                // Modifikasi tampilan untuk Backend/Railway
-                portInput.parentElement.classList.add('hidden'); // Sembunyikan port karena ikut URL
+                portInput.parentElement.classList.add('hidden'); 
                 ipLabel.textContent = "Server URL (Railway)";
                 ipInput.placeholder = "https://namaproject.up.railway.app";
-                ipInput.value = ""; // Kosongkan biar user paste URL
+                autoBtn.classList.add('hidden');
+                
+                // Cek jika URL saat ini mengandung railway, otomatis isi
+                if (window.location.hostname.includes('railway.app')) {
+                     ipInput.value = window.location.origin;
+                } else {
+                     ipInput.value = ""; 
+                }
+                
                 hint.innerHTML = '<b>Tips Backend:</b> Copy URL dari Dashboard Railway (tanpa Port).';
                 backendUserGroup.classList.remove('hidden');
+            }
+        }
+        
+        function toggleManualInput(val) {
+            const manualInput = document.getElementById('backend-username-manual');
+            if (val === 'MANUAL') {
+                manualInput.classList.remove('hidden');
+                manualInput.focus();
+            } else {
+                manualInput.classList.add('hidden');
             }
         }
 
@@ -1176,7 +1199,16 @@
             
             // Get Provider & Username
             state.liveProvider = document.getElementById('conn-provider').value;
-            const backendUsername = document.getElementById('backend-username').value.trim();
+            
+            // LOGIKA BARU: Input Manual vs Dropdown
+            let backendUsername = '';
+            const selectVal = document.getElementById('backend-username-select').value;
+            
+            if (selectVal === 'MANUAL') {
+                backendUsername = document.getElementById('backend-username-manual').value.trim();
+            } else {
+                backendUsername = selectVal;
+            }
 
             const likesInput = document.getElementById('live-likes-target');
             state.liveTargetLikes = likesInput ? (parseInt(likesInput.value) || 500) : 500;
@@ -1263,8 +1295,6 @@
                 
                 try {
                     let connectionUrl;
-                    // Logika pintar: Jika user paste URL lengkap (https://...), pakai itu.
-                    // Jika user cuma ketik IP/localhost, tambahkan http + port.
                     if (ip.startsWith('http')) {
                         connectionUrl = ip;
                     } else {
