@@ -6,14 +6,16 @@ const path = require('path');
 // --- LOAD LIBRARY ---
 let WebcastPushConnection;
 try {
-    // Coba load dari node_modules dulu (Standard Railway/NPM)
+    // 1. Coba load dari node_modules (Cara Standar Railway/Hosting)
     WebcastPushConnection = require('tiktok-live-connector').WebcastPushConnection;
 } catch (e) {
     try {
-        // Fallback ke folder lokal jika user upload folder manual
+        // 2. Fallback: Coba load dari folder manual (Jika Anda upload folder library)
+        // Sesuaikan path ini jika nama folder Anda berbeda!
         WebcastPushConnection = require('./TikTok-Live-Connector-1.2.3/src/index.js').WebcastPushConnection;
     } catch (e2) {
-        console.error("[ERROR] Gagal load library TikTok-Live-Connector.");
+        console.error("[ERROR] Library TikTok-Live-Connector tidak ditemukan!");
+        console.error("Solusi: Pastikan 'package.json' ada dan berisi dependency 'tiktok-live-connector'.");
         process.exit(1);
     }
 }
@@ -21,21 +23,28 @@ try {
 const app = express();
 const server = http.createServer(app);
 
-// --- CONFIG CORS (PENTING UNTUK RAILWAY/HOSTING) ---
+// --- CONFIG CORS (PENTING UNTUK MENGHINDARI BLOKIR) ---
 const io = new Server(server, {
     cors: {
-        origin: "*", // Izinkan koneksi dari mana saja (Frontend)
+        origin: "*", 
         methods: ["GET", "POST"]
     }
 });
 
-// Sajikan file statis (CSS/JS/Gambar jika ada dalam satu folder)
+// Sajikan file statis (CSS/JS/Gambar)
 app.use(express.static(__dirname));
 
-// --- ROUTE UTAMA: BUKA GAME SAAT URL DIAKSES ---
+// --- ROUTE UTAMA ---
 app.get('/', (req, res) => {
-    // Pastikan nama file sesuai dengan file HTML Anda (kosong.html atau index.html)
-    res.sendFile(path.join(__dirname, 'index.html'));
+    // PENTING: Pastikan nama file ini SAMA PERSIS dengan file HTML yang Anda upload.
+    // Jika nama file Anda 'index.html', ganti 'kosong.html' menjadi 'index.html'
+    const htmlFile = 'kosong.html'; 
+    
+    res.sendFile(path.join(__dirname, htmlFile), (err) => {
+        if (err) {
+            res.status(500).send(`Error: File ${htmlFile} tidak ditemukan di server! Pastikan file sudah ter-upload.`);
+        }
+    });
 });
 
 // --- KONFIGURASI FILTER ---
@@ -151,8 +160,11 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- PENTING UNTUK RAILWAY: GUNAKAN PROCESS.ENV.PORT ---
+// --- BAGIAN PALING PENTING UNTUK RAILWAY ---
+// Railway akan memberikan port via process.env.PORT
+// Jika variabel itu tidak ada, barulah kita pakai 3000 (untuk test di laptop sendiri)
 const PORT = process.env.PORT || 3000;
+
 server.listen(PORT, () => {
-    console.log(`\n=== SERVER RUNNING ON PORT ${PORT} ===`);
+    console.log(`\n=== SERVER BERJALAN DI PORT ${PORT} ===`);
 });
